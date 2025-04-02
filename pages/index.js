@@ -44,50 +44,82 @@ export default function Home() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!inputValue.trim()) return;
-
+  
     setIsLoading(true);
     setMessage('');
-
+  
     try {
-      // 1. Dapatkan file saat ini untuk mendapatkan SHA
-      const currentFile = await axios.get(
+      // 1. Dapatkan file saat ini
+      const getResponse = await axios.get(
         `https://api.github.com/repos/${repoConfig.owner}/${repoConfig.repo}/contents/${repoConfig.path}`,
         {
           headers: {
             Authorization: `token ${repoConfig.token}`,
-          },
+            Accept: 'application/vnd.github.v3+json'
+          }
         }
       );
-
-      // 2. Buat konten baru
-      const currentContent = JSON.parse(atob(currentFile.data.content));
+  
+      // 2. Siapkan update
+      const currentContent = JSON.parse(atob(getResponse.data.content));
       const newContent = {
         ...currentContent,
-        items: [...(currentContent.items || []), inputValue],
+        items: [...(currentContent.items || []), inputValue]
       };
-
-      // 3. Update file di GitHub
+  
+      // 3. Eksekusi update
       await axios.put(
         `https://api.github.com/repos/${repoConfig.owner}/${repoConfig.repo}/contents/${repoConfig.path}`,
         {
-          message: `Add new item: ${inputValue}`,
+          message: `Add item: ${inputValue.substring(0, 20)}...`,
           content: btoa(JSON.stringify(newContent, null, 2)),
-          sha: currentFile.data.sha,
-          branch: repoConfig.branch,
+          sha: getResponse.data.sha,
+          branch: repoConfig.branch
         },
         {
           headers: {
             Authorization: `token ${repoConfig.token}`,
-          },
+            Accept: 'application/vnd.github.v3+json',
+            'Content-Type': 'application/json'
+          }
         }
       );
-
+  
+      // Perbaikan: Pastikan semua statement dipisahkan dengan benar
       setInputValue('');
-      setMessage('✅ Item berhasil ditambahkan ke GitHub!');
-      fetchData(); // Refresh data
+      setMessage('✅ Update berhasil!');
+      fetchData();
     } catch (error) {
-      console.error('Error updating file:', error);
-      setMessage('❌ Gagal menambahkan item. Silakan coba lagi.');
+      let errorMessage = '❌ Gagal update: ';
+      
+      if (error.response) {
+        switch (error.response.status) {
+          case 403:
+            if (error.response.headers['x-ratelimit-remaining'] === '0') {
+              const resetTime = new Date(error.response.headers['x-ratelimit-reset'] * 1000);
+              errorMessage += `Rate limit exceeded. Coba lagi setelah ${resetTime.toLocaleTimeString()}`;
+            } else {
+              errorMessage += 'Akses ditolak. Periksa token Anda.';
+            }
+            break;
+          case 404:
+            errorMessage += 'File tidak ditemukan.';
+            break;
+          case 422:
+            errorMessage += 'SHA tidak valid atau konflik.';
+            break;
+          default:
+            errorMessage += `Error ${error.response.status}`;
+        }
+      } else {
+        errorMessage += error.message;
+      }
+  
+      setMessage(errorMessage);
+      console.error('Error details:', {
+        config: error.config,
+        response: error.response?.data
+      });
     } finally {
       setIsLoading(false);
     }
